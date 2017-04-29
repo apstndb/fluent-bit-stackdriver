@@ -1,0 +1,10 @@
+package: .
+import:
+- package: github.com/fluent/fluent-bit-go
+  version: api-0.11
+  subpackages:
+  - output
+- package: github.com/ugorji/go
+  subpackages:
+  - codec
+- package: cloud.google.com/go/logging
