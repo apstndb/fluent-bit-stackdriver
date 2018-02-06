@@ -1,26 +1,21 @@
 package main
+
 import (
+	"C"
 	"fmt"
 	"log"
+	"unsafe"
 
 	// Imports the Stackdriver Logging client package.
 	"cloud.google.com/go/logging"
+	"github.com/fluent/fluent-bit-go/output"
 	"golang.org/x/net/context"
-)
-import "github.com/fluent/fluent-bit-go/output"
-import (
-	"github.com/ugorji/go/codec"
-	"unsafe"
-	"C"
-	"reflect"
-	"time"
 )
 
 //export FLBPluginRegister
 func FLBPluginRegister(ctx unsafe.Pointer) int {
 	return output.FLBPluginRegister(ctx, "stackdriver", "Stackdriver Logging")
 }
-
 
 // Sets your Google Cloud Platform project ID.
 var projectID string
@@ -51,31 +46,20 @@ func FLBPluginFlush(data unsafe.Pointer, length C.int, tag *C.char) int {
 	// Selects the log to write to.
 	logger := client.Logger(logName)
 
-	h := new(codec.MsgpackHandle)
-	b := C.GoBytes(data, length)
-	dec := codec.NewDecoderBytes(b, h)
+	dec := output.NewDecoder(data, int(length))
 
 	// Iterate the original MessagePack array
 	count := 0
 	for {
 		// Decode the entry
-		var m interface{}
-		err = dec.Decode(&m)
-		if err != nil {
+		ret, ts, record := output.GetRecord(dec)
+		if ret != 0 {
 			break
 		}
-
-		// Get a slice and their two entries: timestamp and map
-		slice := reflect.ValueOf(m)
-		timestamp := slice.Index(0)
-		data := slice.Index(1)
-
-		// Convert slice data to a real map and iterate
-		dataMap := data.Interface().(map[interface{}] interface{})
-		// Adds an entry to the log buffer.
-		err = logger.LogSync(ctx, logging.Entry{
-			Payload: ToMarshalable(dataMap),
-			Timestamp: time.Unix(int64(timestamp.Interface().(uint64)), 0)})
+		err := logger.LogSync(ctx, logging.Entry{
+			Payload:   ToMarshalable(record),
+			Timestamp: ts.(output.FLBTime).Time,
+		})
 		if err != nil {
 			log.Fatalf("Failed to log: %v", err)
 		}
@@ -96,11 +80,11 @@ func FLBPluginFlush(data unsafe.Pointer, length C.int, tag *C.char) int {
 	return output.FLB_OK
 }
 
-func ToMarshalable(src map[interface{}]interface{}) map[string] interface{} {
-	result := make(map[string] interface{})
+func ToMarshalable(src map[interface{}]interface{}) map[string]interface{} {
+	result := make(map[string]interface{})
 	for k, v := range src {
-		var v2 interface {}
-		if w, ok := v.(map[interface{}] interface{}); ok {
+		var v2 interface{}
+		if w, ok := v.(map[interface{}]interface{}); ok {
 			v2 = ToMarshalable(w)
 		} else if w, ok := v.([]uint8); ok {
 			v2 = string(w)
